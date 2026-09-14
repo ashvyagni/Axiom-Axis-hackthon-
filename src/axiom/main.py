@@ -6,6 +6,7 @@ from axiom.db.engine import init_db, async_session
 from axiom.tools.registry import registry
 from axiom.skills.registry import skill_registry
 from axiom.world.seed import seed_city
+from axiom.world.weather import weather_provider
 from axiom.api.orchestrator import orchestrator
 from axiom.tools.implementations.core_tools import haversine
 from pathlib import Path
@@ -88,6 +89,11 @@ async def city_state(district_id: str | None = None):
 async def simulate(req: EventRequest):
     result = await registry.execute("simulate_event", event_type=req.event_type, parameters=req.parameters)
     return result.data
+
+
+@app.get("/api/weather")
+async def get_weather(latitude: float = 40.7128, longitude: float = -74.006):
+    return await weather_provider.get_weather(latitude, longitude)
 
 
 @app.post("/api/replan/{incident_id}")

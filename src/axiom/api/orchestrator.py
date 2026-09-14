@@ -8,6 +8,7 @@ from axiom.ai.groq import GroqProvider
 from axiom.tools.registry import registry
 from axiom.skills.registry import skill_registry
 from axiom.observability.prism import prism
+from axiom.world.weather import weather_provider
 from sqlalchemy import select
 from axiom.db.models.domain import AgentRun, Incident, IncidentStatus, Report
 from axiom.db.engine import async_session
@@ -34,7 +35,7 @@ class Orchestrator:
         span_understand_start = time.time()
         existing_incidents = await self._find_similar_incidents(None, latitude, longitude)
         existing_reports = await self._get_existing_reports(existing_incidents)
-        analysis = await self._understand(text, image_url, existing_reports, existing_incidents)
+        analysis = await self._understand(text, image_url, existing_reports, existing_incidents, latitude, longitude)
         prism.finish_span(
             spans[-1] if spans else prism.create_span("search_incidents", "tool", input_text=f"lat={latitude} lon={longitude}"),
             span_understand_start,
@@ -406,7 +407,8 @@ class Orchestrator:
 
     async def _understand(
         self, text: str, image_url: str | None,
-        existing_reports: list[dict], existing_incidents: list[dict]
+        existing_reports: list[dict], existing_incidents: list[dict],
+        latitude: float = 0, longitude: float = 0
     ) -> dict:
         context = ""
         if existing_reports:
@@ -414,6 +416,13 @@ class Orchestrator:
             for r in existing_reports[:2]:
                 context += f"Severity {r.get('severity', '?')}/5. "
             context += "Consider if new report confirms or contradicts."
+
+        weather = await weather_provider.get_weather(latitude, longitude)
+        weather_context = ""
+        if weather.get("is_adverse"):
+            weather_context = f"\nWEATHER: {weather['condition']}, {weather['temperature_c']}°C, wind {weather['wind_speed_kmh']}km/h. Risks: {', '.join(weather.get('risk_factors', []))}. Consider weather impact on severity."
+        elif weather.get("condition") != "unknown":
+            weather_context = f"\nWEATHER: {weather['condition']}, {weather['temperature_c']}°C"
 
         if image_url:
             response = await self.ai.analyze_image(
@@ -430,7 +439,7 @@ class Orchestrator:
 Categories: waste (garbage,bins), water (leaks,pipes), accessibility (ramps,ADA), road (hazards,signs)
 
 CONFIDENCE: <0.5 if vague, contradicts existing, or unclear. uncertainty_reason required if confidence<0.6.
-SEVERITY: 1=cosmetic, 2=needs attention, 3=moderate, 4=significant, 5=emergency{context}'''},
+SEVERITY: 1=cosmetic, 2=needs attention, 3=moderate, 4=significant, 5=emergency{context}{weather_context}'''},
                     {"role": "user", "content": text},
                 ],
                 model=self.ai.fast_model,
