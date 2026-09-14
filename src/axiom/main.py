@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from axiom.db.engine import init_db, async_session
 from axiom.tools.registry import registry
@@ -6,8 +8,11 @@ from axiom.skills.registry import skill_registry
 from axiom.world.seed import seed_city
 from axiom.api.orchestrator import orchestrator
 from axiom.tools.implementations.core_tools import haversine
+from pathlib import Path
 
 app = FastAPI(title="AXIOM", description="AI-powered city operations supervisor", version="0.1.0")
+
+frontend_dir = Path(__file__).parent.parent.parent / "frontend"
 
 
 class ReportRequest(BaseModel):
@@ -103,3 +108,12 @@ async def list_runs():
              "started_at": r.started_at.isoformat() if r.started_at else None}
             for r in runs
         ]}
+
+
+@app.get("/dashboard")
+async def dashboard():
+    return FileResponse(frontend_dir / "index.html")
+
+
+if frontend_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")

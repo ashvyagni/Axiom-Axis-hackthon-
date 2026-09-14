@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AXIOM — City Operations Console</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        axiom: {
+                            bg: '#0a0a0f',
+                            surface: '#12121a',
+                            border: '#1e1e2e',
+                            accent: '#00d4ff',
+                            accentDim: '#00a8cc',
+                            warning: '#ffaa00',
+                            error: '#ff4444',
+                            success: '#00ff88',
+                            text: '#e0e0e0',
+                            muted: '#666680',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background: #0a0a0f; color: #e0e0e0; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glow { box-shadow: 0 0 20px rgba(0, 212, 255, 0.1); }
+        .glow-accent { box-shadow: 0 0 10px rgba(0, 212, 255, 0.3); }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #12121a; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #1e1e2e; border-radius: 3px; }
+        .incident-card { transition: all 0.2s; }
+        .incident-card:hover { border-color: #00d4ff; transform: translateX(2px); }
+        .severity-1 { border-left: 3px solid #00ff88; }
+        .severity-2 { border-left: 3px solid #00d4ff; }
+        .severity-3 { border-left: 3px solid #ffaa00; }
+        .severity-4 { border-left: 3px solid #ff8800; }
+        .severity-5 { border-left: 3px solid #ff4444; }
+        .status-active { color: #00d4ff; }
+        .status-resolved { color: #00ff88; }
+        .status-pending { color: #ffaa00; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-axiom-surface border-r border-axiom-border flex flex-col">
+            <div class="p-4 border-b border-axiom-border">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-axiom-accent/20 flex items-center justify-center">
+                        <svg class="w-6 h-6 text-axiom-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-bold text-white">AXIOM</h1>
+                        <p class="text-xs text-axiom-muted">City Operations Console</p>
+                    </div>
+                </div>
+            </div>
+            
+            <nav class="flex-1 p-4 space-y-1">
+                <button onclick="showView('overview')" id="nav-overview" class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium bg-axiom-accent/10 text-axiom-accent">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                    Overview
+                </button>
+                <button onclick="showView('incidents')" id="nav-incidents" class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-axiom-muted hover:bg-axiom-border/50 hover:text-white transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    Incidents
+                </button>
+                <button onclick="showView('resources')" id="nav-resources" class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-axiom-muted hover:bg-axiom-border/50 hover:text-white transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                    Resources
+                </button>
+                <button onclick="showView('axiom')" id="nav-axiom" class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-axiom-muted hover:bg-axiom-border/50 hover:text-white transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                    AXIOM
+                </button>
+                <button onclick="showView('city')" id="nav-city" class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-axiom-muted hover:bg-axiom-border/50 hover:text-white transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+                    City
+                </button>
+                <button onclick="showView('evaluation')" id="nav-evaluation" class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-axiom-muted hover:bg-axiom-border/50 hover:text-white transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                    Evaluation
+                </button>
+            </nav>
+            
+            <div class="p-4 border-t border-axiom-border">
+                <div class="flex items-center gap-2 text-xs text-axiom-muted">
+                    <div class="w-2 h-2 rounded-full bg-axiom-success pulse"></div>
+                    <span>System Operational</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex flex-col overflow-hidden">
+            <!-- Top Bar -->
+            <header class="h-14 bg-axiom-surface border-b border-axiom-border flex items-center justify-between px-6">
+                <div class="flex items-center gap-4">
+                    <h2 id="view-title" class="text-sm font-semibold text-white">Overview</h2>
+                    <span id="view-subtitle" class="text-xs text-axiom-muted">Real-time city operations</span>
+                </div>
+                <div class="flex items-center gap-4">
+                    <button onclick="submitQuickReport()" class="px-4 py-1.5 bg-axiom-accent/20 text-axiom-accent text-xs font-medium rounded-lg hover:bg-axiom-accent/30 transition">
+                        + New Report
+                    </button>
+                    <div class="text-xs text-axiom-muted mono" id="clock"></div>
+                </div>
+            </header>
+
+            <!-- Content Area -->
+            <div class="flex-1 overflow-auto scrollbar-thin p-6" id="content">
+                <!-- Content loaded dynamically -->
+            </div>
+        </main>
+
+        <!-- Detail Panel -->
+        <aside id="detail-panel" class="w-96 bg-axiom-surface border-l border-axiom-border hidden flex-col">
+            <div class="p-4 border-b border-axiom-border flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-white" id="detail-title">Details</h3>
+                <button onclick="closeDetail()" class="text-axiom-muted hover:text-white">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="flex-1 overflow-auto scrollbar-thin p-4" id="detail-content">
+                <!-- Detail content loaded dynamically -->
+            </div>
+        </aside>
+    </div>
+
+    <!-- Report Modal -->
+    <div id="report-modal" class="fixed inset-0 bg-black/70 hidden items-center justify-center z-50">
+        <div class="bg-axiom-surface border border-axiom-border rounded-xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="p-4 border-b border-axiom-border flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-white">Submit Citizen Report</h3>
+                <button onclick="closeModal()" class="text-axiom-muted hover:text-white">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="p-4 space-y-4">
+                <div>
+                    <label class="block text-xs text-axiom-muted mb-1">Report Text</label>
+                    <textarea id="report-text" rows="3" class="w-full bg-axiom-bg border border-axiom-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-axiom-accent" placeholder="Describe the incident..."></textarea>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-axiom-muted mb-1">Latitude</label>
+                        <input id="report-lat" type="number" step="0.0001" value="40.7128" class="w-full bg-axiom-bg border border-axiom-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-axiom-accent">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-axiom-muted mb-1">Longitude</label>
+                        <input id="report-lon" type="number" step="0.0001" value="-74.006" class="w-full bg-axiom-bg border border-axiom-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-axiom-accent">
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 border-t border-axiom-border flex justify-end gap-3">
+                <button onclick="closeModal()" class="px-4 py-2 text-sm text-axiom-muted hover:text-white transition">Cancel</button>
+                <button onclick="submitReport()" class="px-4 py-2 bg-axiom-accent text-axiom-bg text-sm font-medium rounded-lg hover:bg-axiom-accentDim transition">Submit Report</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = '';
+        let currentView = 'overview';
+        let incidents = [];
+        let teams = [];
+        let runs = [];
+        let cityState = null;
+
+        // Clock
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = now.toLocaleTimeString('en-US', { hour12: false });
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Navigation
+        function showView(view) {
+            currentView = view;
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('bg-axiom-accent/10', 'text-axiom-accent');
+                btn.classList.add('text-axiom-muted');
+            });
+            const activeBtn = document.getElementById(`nav-${view}`);
+            activeBtn.classList.add('bg-axiom-accent/10', 'text-axiom-accent');
+            activeBtn.classList.remove('text-axiom-muted');
+            
+            const titles = {
+                overview: ['Overview', 'Real-time city operations'],
+                incidents: ['Incidents', 'Active and resolved incidents'],
+                resources: ['Resources', 'Teams and availability'],
+                axiom: ['AXIOM', 'AI operational timeline'],
+                city: ['City', 'Districts and infrastructure'],
+                evaluation: ['Evaluation', 'PRISM scores and metrics']
+            };
+            document.getElementById('view-title').textContent = titles[view][0];
+            document.getElementById('view-subtitle').textContent = titles[view][1];
+            
+            loadView(view);
+        }
+
+        async function loadView(view) {
+            const content = document.getElementById('content');
+            content.innerHTML = '<div class="flex items-center justify-center h-64"><div class="text-axiom-muted">Loading...</div></div>';
+            
+            try {
+                await Promise.all([loadIncidents(), loadTeams(), loadRuns(), loadCityState()]);
+                
+                switch(view) {
+                    case 'overview': renderOverview(); break;
+                    case 'incidents': renderIncidents(); break;
+                    case 'resources': renderResources(); break;
+                    case 'axiom': renderAxiom(); break;
+                    case 'city': renderCity(); break;
+                    case 'evaluation': renderEvaluation(); break;
+                }
+            } catch (e) {
+                content.innerHTML = `<div class="text-axiom-error">Error: ${e.message}</div>`;
+            }
+        }
+
+        async function loadIncidents() {
+            const res = await fetch(`${API}/api/incidents`);
+            incidents = await res.json();
+            if (incidents.incidents) incidents = incidents.incidents;
+        }
+
+        async function loadTeams() {
+            const res = await fetch(`${API}/api/teams`);
+            const data = await res.json();
+            teams = data.teams || [];
+        }
+
+        async function loadRuns() {
+            const res = await fetch(`${API}/api/runs`);
+            const data = await res.json();
+            runs = data.runs || [];
+        }
+
+        async function loadCityState() {
+            const res = await fetch(`${API}/api/city-state`);
+            cityState = await res.json();
+        }
+
+        // Renderers
+        function renderOverview() {
+            const activeIncidents = incidents.filter(i => i.status !== 'resolved' && i.status !== 'failed');
+            const criticalCount = activeIncidents.filter(i => i.severity >= 4).length;
+            const availableTeams = teams.filter(t => t.status !== 'unavailable').length;
+            
+            document.getElementById('content').innerHTML = `
+                <div class="space-y-6 fade-in">
+                    <!-- Stats Grid -->
+                    <div class="grid grid-cols-4 gap-4">
+                        <div class="bg-axiom-surface border border-axiom-border rounded-xl p-4">
+                            <div class="text-2xl font-bold text-white">${activeIncidents.length}</div>
+                            <div class="text-xs text-axiom-muted">Active Incidents</div>
+                        </div>
+                        <div class="bg-axiom-surface border border-axiom-border rounded-xl p-4">
+                            <div class="text-2xl font-bold text-axiom-error">${criticalCount}</div>
+                            <div class="text-xs text-axiom-muted">Critical</div>
+                        </div>
+                        <div class="bg-axiom-surface border border-axiom-border rounded-xl p-4">
+                            <div class="text-2xl font-bold text-axiom-success">${availableTeams}</div>
+                            <div class="text-xs text-axiom-muted">Teams Available</div>
+                        </div>
+                        <div class="bg-axiom-surface border border-axiom-border rounded-xl p-4">
+                            <div class="text-2xl font-bold text-axiom-accent">${runs.length}</div>
+                            <div class="text-xs text-axiom-muted">AXIOM Runs</div>
+                        </div>
+                    </div>
+
+                    <!-- Two Column Layout -->
+                    <div class="grid grid-cols-2 gap-6">
+                        <!-- Active Incidents -->
+                        <div class="bg-axiom-surface border border-axiom-border rounded-xl">
+                            <div class="p-4 border-b border-axiom-border flex items-center justify-between">
+                                <h3 class="text-sm font-semibold text-white">Active Incidents</h3>
+                                <button onclick="showView('incidents')" class="text-xs text-axiom-accent hover:underline">View All</button>
+                            </div>
+                            <div class="p-4 space-y-2 max-h-80 overflow-auto scrollbar-thin">
+                                ${activeIncidents.length === 0 ? '<div class="text-xs text-axiom-muted">No active incidents</div>' :
+                                activeIncidents.slice(0, 5).map(i => `
+                                    <div class="incident-card severity-${i.severity} bg-axiom-bg rounded-lg p-3 cursor-pointer" onclick="showIncidentDetail('${i.id}')">
+                                        <div class="flex items-center justify-between">
+                                            <span class="text-xs font-medium text-white">${i.category}</span>
+                                            <span class="text-xs mono text-axiom-muted">${i.id.slice(0, 8)}</span>
+                                        </div>
+                                        <div class="text-xs text-axiom-muted mt-1 line-clamp-1">${i.description || 'No description'}</div>
+                                        <div class="flex items-center gap-2 mt-2">
+                                            <span class="text-xs px-2 py-0.5 rounded bg-axiom-border/50 text-axiom-muted">S${i.severity}</span>
+                                            <span class="text-xs px-2 py-0.5 rounded bg-axiom-border/50 text-axiom-muted">${i.status}</span>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <!-- Recent Activity -->
+                        <div class="bg-axiom-surface border border-axiom-border rounded-xl">
+                            <div class="p-4 border-b border-axiom-border flex items-center justify-between">
+                                <h3 class="text-sm font-semibold text-white">Recent AXIOM Activity</h3>
+                                <button onclick="showView('axiom')" class="text-xs text-axiom-accent hover:underline">View All</button>
+                            </div>
+                            <div class="p-4 space-y-2 max-h-80 overflow-auto scrollbar-thin">
+                                ${runs.length === 0 ? '<div class="text-xs text-axiom-muted">No activity yet</div>' :
+                                runs.slice(0, 5).map(r => `
+                                    <div class="bg-axiom-bg rounded-lg p-3">
+                                        <div class="flex items-center justify-between">
+                                            <span class="text-xs font-medium text-white">${r.skill_used || 'unknown'}</span>
+                                            <span class="text-xs mono text-axiom-muted">${r.session_id}</span>
+                                        </div>
+                                        <div class="text-xs text-axiom-muted mt-1 line-clamp-2">${r.outcome || 'Processing...'}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Resources -->
+                    <div class="bg-axiom-surface border border-axiom-border rounded-xl">
+                        <div class="p-4 border-b border-axiom-border">
+                            <h3 class="text-sm font-semibold text-white">Resource Status</h3>
+                        </div>
+                        <div class="p-4 grid grid-cols-4 gap-4">
+                            ${teams.map(t => `
+                                <div class="bg-axiom-bg rounded-lg p-3 border border-axiom-border">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-2 h-2 rounded-full ${t.status === 'available' ? 'bg-axiom-success' : t.status === 'unavailable' ? 'bg-axiom-error' : 'bg-axiom-warning'}"></div>
+                                        <span class="text-xs font-medium text-white">${t.name}</span>
+                                    </div>
+                                    <div class="text-xs text-axiom-muted mt-1">${t.capabilities?.join(', ') || 'General'}</div>
+                                    <div class="text-xs text-axiom-muted mt-1">${t.status}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderIncidents() {
+            document.getElementById('content').innerHTML = `
+                <div class="space-y-4 fade-in">
+                    <div class="flex items-center gap-4 mb-6">
+                        <select id="filter-category" onchange="filterIncidents()" class="bg-axiom-surface border border-axiom-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-axiom-accent">
+                            <option value="">All Categories</option>
+                            <option value="waste">Waste</option>
+                            <option value="water">Water</option>
+                            <option value="accessibility">Accessibility</option>
+                            <option value="road">Road</option>
+                        </select>
+                        <select id="filter-status" onchange="filterIncidents()" class="bg-axiom-surface border border-axiom-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-axiom-accent">
+                            <option value="">All Status</option>
+                            <option value="open">Open</option>
+                            <option value="acknowledged">Acknowledged</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="resolved">Resolved</option>
+                        </select>
+                    </div>
+                    <div id="incidents-list" class="space-y-3">
+                        ${renderIncidentsList(incidents)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderIncidentsList(list) {
+            if (list.length === 0) return '<div class="text-axiom-muted text-sm">No incidents found</div>';
+            return list.map(i => `
+                <div class="incident-card severity-${i.severity} bg-axiom-surface border border-axiom-border rounded-xl p-4 cursor-pointer" onclick="showIncidentDetail('${i.id}')">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3">
+                                <span class="text-sm font-semibold text-white">${i.category}</span>
+                                <span class="text-xs px-2 py-0.5 rounded bg-axiom-border/50 text-axiom-muted">S${i.severity}</span>
+                                <span class="text-xs px-2 py-0.5 rounded ${i.status === 'resolved' ? 'bg-axiom-success/20 text-axiom-success' : 'bg-axiom-border/50 text-axiom-muted'}">${i.status}</span>
+                            </div>
+                            <div class="text-sm text-axiom-muted mt-2">${i.description || 'No description'}</div>
+                            <div class="flex items-center gap-4 mt-3 text-xs text-axiom-muted">
+                                <span class="mono">${i.id.slice(0, 8)}</span>
+                                <span>Confidence: ${(i.confidence * 100).toFixed(0)}%</span>
+                                <span>${i.latitude?.toFixed(4)}, ${i.longitude?.toFixed(4)}</span>
+                            </div>
+                        </div>
+                        <svg class="w-5 h-5 text-axiom-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterIncidents() {
+            const category = document.getElementById('filter-category').value;
+            const status = document.getElementById('filter-status').value;
+            let filtered = incidents;
+            if (category) filtered = filtered.filter(i => i.category === category);
+            if (status) filtered = filtered.filter(i => i.status === status);
+            document.getElementById('incidents-list').innerHTML = renderIncidentsList(filtered);
+        }
+
+        function renderResources() {
+            document.getElementById('content').innerHTML = `
+                <div class="space-y-4 fade-in">
+                    <div class="grid grid-cols-2 gap-4">
+                        ${teams.map(t => `
+                            <div class="bg-axiom-surface border border-axiom-border rounded-xl p-4">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 rounded-lg bg-axiom-accent/20 flex items-center justify-center">
+                                            <svg class="w-5 h-5 text-axiom-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                        </div>
+                                        <div>
+                                            <div class="text-sm font-semibold text-white">${t.name}</div>
+                                            <div class="text-xs text-axiom-muted">${t.id.slice(0, 8)}</div>
+                                        </div>
+                                    </div>
+                                    <div class="w-2 h-2 rounded-full ${t.status === 'available' ? 'bg-axiom-success' : t.status === 'unavailable' ? 'bg-axiom-error' : 'bg-axiom-warning'}"></div>
+                                </div>
+                                <div class="mt-4 space-y-2">
+                                    <div class="flex items-center justify-between text-xs">
+                                        <span class="text-axiom-muted">Status</span>
+                                        <span class="${t.status === 'available' ? 'text-axiom-success' : 'text-axiom-error'}">${t.status}</span>
+                                    </div>
+                                    <div class="flex items-center justify-between text-xs">
+                                        <span class="text-axiom-muted">Capabilities</span>
+                                        <span class="text-white">${t.capabilities?.join(', ') || 'General'}</span>
+                                    </div>
+                                    <div class="flex items-center justify-between text-xs">
+                                        <span class="text-axiom-muted">Location</span>
+                                        <span class="text-white mono">${t.latitude?.toFixed(4)}, ${t.longitude?.toFixed(4)}</span>
+                                    </div>
+                                    ${t.eta_minutes ? `
+                                    <div class="flex items-center justify-between text-xs">
+                                        <span class="text-axiom-muted">ETA</span>
+                                        <span class="text-axiom-accent">${t.eta_minutes} min</span>
+                                    </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAxiom() {
+            document.getElementById('content').innerHTML = `
+                <div class="space-y-4 fade-in">
+                    <div class="bg-axiom-surface border border-axiom-border rounded-xl">
+                        <div class="p-4 border-b border-axiom-border">
+                            <h3 class="text-sm font-semibold text-white">AXIOM Operational Timeline</h3>
+                        </div>
+                        <div class="p-4 space-y-3 max-h-[calc(100vh-200px)] overflow-auto scrollbar-thin">
+                            ${runs.length === 0 ? '<div class="text-axiom-muted text-sm">No activity yet. Submit a report to start.</div>' :
+                            runs.map(r => `
+                                <div class="bg-axiom-bg rounded-lg p-4 border border-axiom-border">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs px-2 py-0.5 rounded bg-axiom-accent/20 text-axiom-accent">${r.skill_used || 'unknown'}</span>
+                                            <span class="text-xs text-axiom-muted">${r.session_id}</span>
+                                        </div>
+                                        <span class="text-xs text-axiom-muted">${r.started_at ? new Date(r.started_at).toLocaleTimeString() : ''}</span>
+                                    </div>
+                                    <div class="text-sm text-white">${r.outcome || 'Processing...'}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCity() {
+            const districts = cityState?.districts || [];
+            const infrastructure = cityState?.infrastructure || [];
+            
+            document.getElementById('content').innerHTML = `
+                <div class="space-y-6 fade-in">
+                    <!-- Districts -->
+                    <div class="bg-axiom-surface border border-axiom-border rounded-xl">
+                        <div class="p-4 border-b border-axiom-border">
+                            <h3 class="text-sm font-semibold text-white">Districts</h3>
+                        </div>
+                        <div class="p-4 grid grid-cols-4 gap-4">
+                            ${districts.length === 0 ? '<div class="text-axiom-muted text-sm">No districts loaded</div>' :
+                            districts.map(d => `
+                                <div class="bg-axiom-bg rounded-lg p-4 border border-axiom-border">
+                                    <div class="text-sm font-semibold text-white">${d.name}</div>
+                                    <div class="text-xs text-axiom-muted mt-1">${d.id.slice(0, 8)}</div>
+                                    <div class="text-xs text-axiom-muted mt-2">Pop: ${d.population?.toLocaleString() || 'N/A'}</div>
+                                    <div class="text-xs text-axiom-muted">Area: ${d.area_km2 || 'N/A'} km²</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Infrastructure -->
+                    <div class="bg-axiom-surface border border-axiom-border rounded-xl">
+                        <div class="p-4 border-b border-axiom-border">
+                            <h3 class="text-sm font-semibold text-white">Infrastructure</h3>
+                        </div>
+                        <div class="p-4 grid grid-cols-3 gap-4">
+                            ${infrastructure.length === 0 ? '<div class="text-axiom-muted text-sm">No infrastructure loaded</div>' :
+                            infrastructure.slice(0, 12).map(i => `
+                                <div class="bg-axiom-bg rounded-lg p-3 border border-axiom-border">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-2 h-2 rounded-full ${i.status === 'operational' ? 'bg-axiom-success' : i.status === 'maintenance' ? 'bg-axiom-warning' : 'bg-axiom-error'}"></div>
+                                        <span class="text-xs font-medium text-white">${i.name || i.type}</span>
+                                    </div>
+                                    <div class="text-xs text-axiom-muted mt-1">${i.type} • ${i.status}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderEvaluation() {
+            document.getElementById('content').innerHTML = `
+                <div class="space-y-6 fade-in">
+                    <div class="bg-axiom-surface border border-axiom-border rounded-xl p-6">
+                        <h3 class="text-sm font-semibold text-white mb-4">PRISM Integration</h3>
+                        <div class="grid grid-cols-3 gap-4">
+                            <div class="bg-axiom-bg rounded-lg p-4 border border-axiom-border">
+                                <div class="text-2xl font-bold text-axiom-accent">133</div>
+                                <div class="text-xs text-axiom-muted">Total Traces</div>
+                            </div>
+                            <div class="bg-axiom-bg rounded-lg p-4 border border-axiom-border">
+                                <div class="text-2xl font-bold text-axiom-success">71.9</div>
+                                <div class="text-xs text-axiom-muted">Avg Satisfaction</div>
+                            </div>
+                            <div class="bg-axiom-bg rounded-lg p-4 border border-axiom-border">
+                                <div class="text-2xl font-bold text-axiom-warning">20</div>
+                                <div class="text-xs text-axiom-muted">Flagged</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-axiom-surface border border-axiom-border rounded-xl p-6">
+                        <h3 class="text-sm font-semibold text-white mb-4">Evaluation Results</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-axiom-bg rounded-lg p-4 border border-axiom-border">
+                                <div class="text-2xl font-bold text-axiom-success">27/27</div>
+                                <div class="text-xs text-axiom-muted">Checks Passed (100%)</div>
+                            </div>
+                            <div class="bg-axiom-bg rounded-lg p-4 border border-axiom-border">
+                                <div class="text-2xl font-bold text-axiom-accent">V2</div>
+                                <div class="text-xs text-axiom-muted">Current Version</div>
+                            </div>
+                        </div>
+                        <div class="mt-4 text-xs text-axiom-muted">
+                            V1: 24/26 (92.3%) → V2: 27/27 (100%) • +7.7pp improvement
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Detail Panel
+        function showIncidentDetail(id) {
+            const incident = incidents.find(i => i.id === id);
+            if (!incident) return;
+            
+            document.getElementById('detail-title').textContent = `Incident ${id.slice(0, 8)}`;
+            document.getElementById('detail-content').innerHTML = `
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-xs text-axiom-muted">Category</label>
+                            <div class="text-sm text-white">${incident.category}</div>
+                        </div>
+                        <div>
+                            <label class="text-xs text-axiom-muted">Severity</label>
+                            <div class="text-sm text-white">S${incident.severity}</div>
+                        </div>
+                        <div>
+                            <label class="text-xs text-axiom-muted">Status</label>
+                            <div class="text-sm ${incident.status === 'resolved' ? 'text-axiom-success' : 'text-white'}">${incident.status}</div>
+                        </div>
+                        <div>
+                            <label class="text-xs text-axiom-muted">Confidence</label>
+                            <div class="text-sm text-white">${(incident.confidence * 100).toFixed(0)}%</div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs text-axiom-muted">Description</label>
+                        <div class="text-sm text-white mt-1">${incident.description || 'No description'}</div>
+                    </div>
+                    <div>
+                        <label class="text-xs text-axiom-muted">Location</label>
+                        <div class="text-sm text-white mono">${incident.latitude?.toFixed(6)}, ${incident.longitude?.toFixed(6)}</div>
+                    </div>
+                    ${incident.assigned_team ? `
+                    <div>
+                        <label class="text-xs text-axiom-muted">Assigned Team</label>
+                        <div class="text-sm text-axiom-accent">${incident.assigned_team}</div>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+            document.getElementById('detail-panel').classList.remove('hidden');
+            document.getElementById('detail-panel').classList.add('flex');
+        }
+
+        function closeDetail() {
+            document.getElementById('detail-panel').classList.add('hidden');
+            document.getElementById('detail-panel').classList.remove('flex');
+        }
+
+        // Modal
+        function submitQuickReport() {
+            document.getElementById('report-modal').classList.remove('hidden');
+            document.getElementById('report-modal').classList.add('flex');
+        }
+
+        function closeModal() {
+            document.getElementById('report-modal').classList.add('hidden');
+            document.getElementById('report-modal').classList.remove('flex');
+        }
+
+        async function submitReport() {
+            const text = document.getElementById('report-text').value;
+            const lat = parseFloat(document.getElementById('report-lat').value);
+            const lon = parseFloat(document.getElementById('report-lon').value);
+            
+            if (!text.trim()) return alert('Please enter a report');
+            
+            try {
+                const res = await fetch(`${API}/api/report`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, latitude: lat, longitude: lon })
+                });
+                const result = await res.json();
+                closeModal();
+                document.getElementById('report-text').value = '';
+                loadView(currentView);
+                
+                // Show result in detail panel
+                if (result.incident_id) {
+                    showIncidentDetail(result.incident_id);
+                }
+            } catch (e) {
+                alert('Error submitting report: ' + e.message);
+            }
+        }
+
+        // Auto-refresh
+        setInterval(() => {
+            if (currentView === 'overview' || currentView === 'incidents') {
+                loadView(currentView);
+            }
+        }, 10000);
+
+        // Initial load
+        loadView('overview');
+    </script>
+</body>
+</html>
