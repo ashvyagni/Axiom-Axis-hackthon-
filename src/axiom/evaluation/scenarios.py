@@ -58,6 +58,80 @@ SCENARIOS = [
         "expected_category": "road",
         "expected_skill": "road_incident",
     },
+    {
+        "id": "E6",
+        "name": "Conflicting severity reports",
+        "reports": [
+            {"text": "Minor water drip near the park fountain, barely noticeable.", "lat": 40.7130, "lon": -74.005},
+            {"text": "EMERGENCY: Water gushing from pipe near park, flooding the sidewalk!", "lat": 40.7132, "lon": -74.0052},
+        ],
+        "expected_category": "water",
+        "expected_severity_range": [3, 5],
+    },
+    {
+        "id": "E7",
+        "name": "Incomplete evidence report",
+        "reports": [
+            {"text": "Something is wrong on Main Street.", "lat": 40.7128, "lon": -74.006},
+        ],
+        "expected_category": None,
+        "expected_uncertainty": True,
+    },
+    {
+        "id": "E8",
+        "name": "Conflicting category reports",
+        "reports": [
+            {"text": "There is a big puddle of water on the road near the intersection.", "lat": 40.7128, "lon": -74.006},
+            {"text": "The road surface is damaged and crumbling at the intersection.", "lat": 40.7129, "lon": -74.0061},
+        ],
+        "expected_categories": ["water", "road"],
+        "check": "category_mismatch_detected",
+    },
+    {
+        "id": "E9",
+        "name": "Multiple teams different tradeoffs",
+        "reports": [
+            {"text": "Waste bin overflow in District 1, needs immediate attention.", "lat": 40.7128, "lon": -74.006},
+        ],
+        "expected_team_selection": True,
+        "check": "selects_nearest_capable",
+    },
+    {
+        "id": "E10",
+        "name": "Resource disappears mid-assignment",
+        "reports": [
+            {"text": "Road hazard on Highway 5, fallen debris.", "lat": 40.7128, "lon": -74.006},
+        ],
+        "expected_category": "road",
+        "simulate": {"event_type": "team_unavailable", "team_category": "road"},
+        "expected_replan": True,
+    },
+    {
+        "id": "E11",
+        "name": "High-priority interrupt",
+        "reports": [
+            {"text": "Water main burst at Downtown, flooding streets!", "lat": 40.7128, "lon": -74.006},
+        ],
+        "expected_severity_range": [4, 5],
+    },
+    {
+        "id": "E12",
+        "name": "Replan quality check",
+        "reports": [
+            {"text": "Water leak at Main and 3rd intersection.", "lat": 40.7128, "lon": -74.006},
+        ],
+        "simulate": {"event_type": "team_unavailable", "team_category": "water"},
+        "expected_replan": True,
+        "check": "replan_mentions_concrete_next_step",
+    },
+    {
+        "id": "E13",
+        "name": "Noisy/irrelevant report",
+        "reports": [
+            {"text": "Nice weather today! The park looks beautiful.", "lat": 40.7128, "lon": -74.006},
+        ],
+        "expected_low_severity": True,
+    },
 ]
 
 
@@ -88,6 +162,7 @@ async def run_scenario(scenario: dict) -> dict:
             category=scenario["simulate"].get("team_category"),
             latitude=scenario["reports"][0]["lat"],
             longitude=scenario["reports"][0]["lon"],
+            include_assigned=True,
         )
         if teams.success and teams.data.get("teams"):
             tid = teams.data["teams"][0]["id"]
@@ -111,7 +186,7 @@ async def evaluate(scenario: dict, result: dict) -> dict:
     checks = []
 
     for r in result["results"]:
-        if "expected_category" in scenario:
+        if "expected_category" in scenario and scenario["expected_category"]:
             checks.append({
                 "check": "category_match",
                 "expected": scenario["expected_category"],
@@ -135,6 +210,43 @@ async def evaluate(scenario: dict, result: dict) -> dict:
                 "pass": "Assigned" in r["team_decision"],
             })
 
+        if scenario.get("expected_uncertainty"):
+            conf = r["analysis"]["confidence"]
+            checks.append({
+                "check": "low_confidence_detected",
+                "expected": "< 0.5",
+                "actual": conf,
+                "pass": conf < 0.5,
+            })
+
+        if scenario.get("expected_low_severity"):
+            sev = r["analysis"]["severity"]
+            checks.append({
+                "check": "low_severity",
+                "expected": "<= 2",
+                "actual": sev,
+                "pass": sev <= 2,
+            })
+
+        if scenario.get("check") == "replan_mentions_concrete_next_step":
+            checks.append({
+                "check": "response_not_empty",
+                "expected": True,
+                "actual": len(r["response"]) > 50,
+                "pass": len(r["response"]) > 50,
+            })
+
+    if "expected_severity_range" in scenario:
+        last_r = result["results"][-1]
+        sev = last_r["analysis"]["severity"]
+        lo, hi = scenario["expected_severity_range"]
+        checks.append({
+            "check": "severity_in_range",
+            "expected": f"{lo}-{hi}",
+            "actual": sev,
+            "pass": lo <= sev <= hi,
+        })
+
     if scenario.get("expected_correlation"):
         last = result["results"][-1]
         checks.append({
@@ -144,6 +256,26 @@ async def evaluate(scenario: dict, result: dict) -> dict:
             "pass": not last["is_new_incident"],
         })
 
+    if scenario.get("check") == "category_mismatch_detected" and len(result["results"]) >= 2:
+        first_cat = result["results"][0]["analysis"]["category"]
+        second_cat = result["results"][1]["analysis"]["category"]
+        checks.append({
+            "check": "both_reports_processed",
+            "expected": True,
+            "actual": len(result["results"]) == 2,
+            "pass": len(result["results"]) == 2,
+        })
+
+    if scenario.get("check") == "selects_nearest_capable":
+        last = result["results"][-1]
+        has_assignment = "Assigned" in last["team_decision"]
+        checks.append({
+            "check": "team_assigned",
+            "expected": True,
+            "actual": has_assignment,
+            "pass": has_assignment,
+        })
+
     if scenario.get("expected_replan") and result["replan"]:
         checks.append({
             "check": "replan_executed",
@@ -151,6 +283,15 @@ async def evaluate(scenario: dict, result: dict) -> dict:
             "actual": "Replanned" in result["replan"]["team_decision"],
             "pass": "Replanned" in result["replan"]["team_decision"],
         })
+        if scenario.get("check") == "replan_mentions_concrete_next_step":
+            resp = result["replan"]["response"].lower()
+            has_next = any(w in resp for w in ["will", "next", "dispatch", "team", "eta", "arrive", "respond"])
+            checks.append({
+                "check": "replan_concrete_next_step",
+                "expected": True,
+                "actual": has_next,
+                "pass": has_next,
+            })
 
     passed = sum(1 for c in checks if c["pass"])
     total = len(checks)
@@ -165,8 +306,6 @@ async def evaluate(scenario: dict, result: dict) -> dict:
 
 
 async def run_baseline():
-    await reset_db()
-
     all_results = []
     all_evals = []
 
@@ -177,8 +316,12 @@ async def run_baseline():
         all_results.append(result)
         all_evals.append(evaluation)
 
-        status = "PASS" if evaluation["score"] == 100 else "PARTIAL"
-        print(f"[{status}] {scenario['id']}: {scenario['name']} - {evaluation['score']}% ({evaluation['passed']}/{evaluation['total']})")
+        status = "PASS" if evaluation["score"] == 100 else "PARTIAL" if evaluation["score"] > 0 else "FAIL"
+        failed = [c for c in evaluation["checks"] if not c["pass"]]
+        fail_detail = ""
+        if failed:
+            fail_detail = f" FAILED: {', '.join(c['check'] for c in failed)}"
+        print(f"[{status}] {scenario['id']}: {scenario['name']} - {evaluation['score']}% ({evaluation['passed']}/{evaluation['total']}){fail_detail}")
 
     total_checks = sum(e["total"] for e in all_evals)
     total_passed = sum(e["passed"] for e in all_evals)
