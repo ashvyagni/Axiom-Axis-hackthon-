@@ -9,6 +9,7 @@ from axiom.world.seed import seed_city
 from axiom.world.weather import weather_provider
 from axiom.api.orchestrator import orchestrator
 from axiom.tools.implementations.core_tools import haversine
+from axiom.demo import list_scenarios, run_full_demo
 from pathlib import Path
 
 app = FastAPI(title="AXIOM", description="AI-powered city operations supervisor", version="0.1.0")
@@ -94,6 +95,16 @@ async def simulate(req: EventRequest):
 @app.get("/api/weather")
 async def get_weather(latitude: float = 40.7128, longitude: float = -74.006):
     return await weather_provider.get_weather(latitude, longitude)
+
+
+@app.get("/api/demo/scenarios")
+async def demo_scenarios():
+    return {"scenarios": list_scenarios()}
+
+
+@app.post("/api/demo/run/{scenario_name}")
+async def demo_run(scenario_name: str):
+    return await run_full_demo(scenario_name)
 
 
 @app.post("/api/replan/{incident_id}")

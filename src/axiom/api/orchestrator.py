@@ -420,9 +420,7 @@ class Orchestrator:
         weather = await weather_provider.get_weather(latitude, longitude)
         weather_context = ""
         if weather.get("is_adverse"):
-            weather_context = f"\nWEATHER: {weather['condition']}, {weather['temperature_c']}°C, wind {weather['wind_speed_kmh']}km/h. Risks: {', '.join(weather.get('risk_factors', []))}. Consider weather impact on severity."
-        elif weather.get("condition") != "unknown":
-            weather_context = f"\nWEATHER: {weather['condition']}, {weather['temperature_c']}°C"
+            weather_context = f"\nWEATHER ALERT: {weather['condition']}, {weather['temperature_c']}°C, wind {weather['wind_speed_kmh']}km/h. Risks: {', '.join(weather.get('risk_factors', []))}. If report mentions weather-related issues (flooding, wind damage, ice), increase severity."
 
         if image_url:
             response = await self.ai.analyze_image(
