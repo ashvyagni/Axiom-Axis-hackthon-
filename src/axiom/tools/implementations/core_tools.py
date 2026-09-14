@@ -227,9 +227,12 @@ registry.register(
 )
 
 
-async def get_available_teams(category: str | None = None, latitude: float | None = None, longitude: float | None = None) -> dict:
+async def get_available_teams(category: str | None = None, latitude: float | None = None, longitude: float | None = None, include_assigned: bool = False) -> dict:
     async with _get_db() as db:
-        query = select(Team).where(Team.status == TeamStatus.AVAILABLE.value)
+        if include_assigned:
+            query = select(Team).where(Team.status.in_([TeamStatus.AVAILABLE.value, TeamStatus.ASSIGNED.value]))
+        else:
+            query = select(Team).where(Team.status == TeamStatus.AVAILABLE.value)
         teams = (await db.execute(query)).scalars().all()
 
         result = []
@@ -268,6 +271,7 @@ registry.register(
         "category": {"type": "string", "description": "Filter by capability category"},
         "latitude": {"type": "number", "description": "Reference latitude for distance sorting"},
         "longitude": {"type": "number", "description": "Reference longitude for distance sorting"},
+        "include_assigned": {"type": "boolean", "description": "Include assigned teams for replanning (default false)"},
     },
     handler=get_available_teams,
 )

@@ -83,3 +83,23 @@ async def city_state(district_id: str | None = None):
 async def simulate(req: EventRequest):
     result = await registry.execute("simulate_event", event_type=req.event_type, parameters=req.parameters)
     return result.data
+
+
+@app.post("/api/replan/{incident_id}")
+async def replan(incident_id: str):
+    result = await orchestrator.replan_for_incident(incident_id)
+    return result
+
+
+@app.get("/api/runs")
+async def list_runs():
+    from axiom.db.models.domain import AgentRun
+    from sqlalchemy import select
+    async with async_session() as db:
+        runs = (await db.execute(select(AgentRun).order_by(AgentRun.created_at.desc()).limit(20))).scalars().all()
+        return {"runs": [
+            {"id": r.id, "session_id": r.session_id, "status": r.status,
+             "skill_used": r.skill_used, "outcome": r.outcome,
+             "started_at": r.started_at.isoformat() if r.started_at else None}
+            for r in runs
+        ]}
