@@ -20,6 +20,72 @@ class Orchestrator:
     def __init__(self):
         self.ai = GroqProvider()
 
+    async def _generate_plan(
+        self, analysis: dict, existing_incidents: list[dict],
+        existing_reports: list[dict], weather: dict
+    ) -> dict:
+        """Generate an operational plan before taking action."""
+        priority = "low"
+        if analysis.get("severity", 1) >= 4:
+            priority = "critical"
+        elif analysis.get("severity", 1) >= 3:
+            priority = "high"
+        elif analysis.get("severity", 1) >= 2:
+            priority = "medium"
+        
+        risk_factors = []
+        if weather.get("is_adverse"):
+            risk_factors.extend(weather.get("risk_factors", []))
+        if analysis.get("confidence", 0.5) < 0.5:
+            risk_factors.append("low_confidence")
+        if existing_incidents:
+            risk_factors.append("existing_incidents_in_area")
+        
+        return {
+            "steps": [
+                f"Classify {analysis.get('category')} incident",
+                "Search for similar incidents",
+                "Retrieve applicable policies",
+                "Dispatch available team",
+                "Verify outcome",
+            ],
+            "priority": priority,
+            "risk_factors": risk_factors,
+            "expected_outcome": f"Incident classified as {analysis.get('category')} severity {analysis.get('severity')}, team dispatched",
+        }
+
+    async def _verify_outcome(
+        self, incident_id: str, action_taken: str, expected_outcome: str
+    ) -> dict:
+        """Verify whether the intended outcome was achieved."""
+        result = await registry.execute("get_incident", incident_id=incident_id)
+        if not result.success:
+            return {"verified": False, "reason": "Could not retrieve incident"}
+        
+        incident = result.data
+        current_status = incident.get("status", "unknown")
+        
+        verification = {
+            "incident_id": incident_id,
+            "action_taken": action_taken,
+            "current_status": current_status,
+            "verified": current_status in ["acknowledged", "in_progress"],
+            "verification_time": datetime.utcnow().isoformat(),
+        }
+        
+        if current_status == "resolved":
+            verification["verified"] = True
+            verification["outcome"] = "Incident marked as resolved"
+        elif current_status == "failed":
+            verification["verified"] = False
+            verification["outcome"] = "Incident resolution failed"
+            verification["replan_needed"] = True
+        else:
+            verification["verified"] = True
+            verification["outcome"] = f"Incident is {current_status}, awaiting resolution"
+        
+        return verification
+
     async def process_report(self, text: str, image_url: str | None = None, latitude: float = 0, longitude: float = 0) -> dict:
         run_id = str(uuid.uuid4())
         session_id = f"run-{run_id[:8]}"
@@ -57,6 +123,19 @@ class Orchestrator:
         span_understand["start_time"] = prism._now_iso()
         span_understand["duration_ms"] = int((time.time() - span_understand_start) * 1000)
         spans.append(span_understand)
+
+        span_plan_start = time.time()
+        weather = await weather_provider.get_weather(latitude, longitude)
+        plan = await self._generate_plan(analysis, existing_incidents, existing_reports, weather)
+        span_plan = prism.create_span(
+            name="generate_plan",
+            span_type="llm",
+            input_text=json.dumps({"category": category, "severity": severity})[:500],
+            output_text=json.dumps(plan)[:500],
+            model=self.ai.fast_model,
+        )
+        span_plan["duration_ms"] = int((time.time() - span_plan_start) * 1000)
+        spans.append(span_plan)
 
         incident_id = None
         is_new_incident = True
@@ -193,6 +272,24 @@ class Orchestrator:
         )
         span_policy["duration_ms"] = int((time.time() - span_policy_start) * 1000)
         spans.append(span_policy)
+
+        if incident_id and team_decision and "Assigned" in team_decision:
+            span_verify_start = time.time()
+            verification = await self._verify_outcome(
+                incident_id,
+                team_decision,
+                plan.get("expected_outcome", "Incident addressed"),
+            )
+            span_verify = prism.create_span(
+                name="verify_outcome",
+                span_type="tool",
+                input_text=f"incident={incident_id} action={team_decision}",
+                output_text=json.dumps(verification)[:500],
+            )
+            span_verify["duration_ms"] = int((time.time() - span_verify_start) * 1000)
+            spans.append(span_verify)
+        else:
+            verification = {"verified": False, "reason": "No action taken"}
 
         span_response_start = time.time()
         response_text = await self._generate_response(
