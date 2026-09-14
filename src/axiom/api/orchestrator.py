@@ -22,24 +22,40 @@ class Orchestrator:
     async def process_report(self, text: str, image_url: str | None = None, latitude: float = 0, longitude: float = 0) -> dict:
         run_id = str(uuid.uuid4())
         session_id = f"run-{run_id[:8]}"
-        start = time.time()
+        run_start = time.time()
         tool_calls_log = []
+        spans = []
 
         async with async_session() as db:
             run = AgentRun(id=run_id, session_id=session_id, status="running")
             db.add(run)
             await db.commit()
 
+        span_understand_start = time.time()
         existing_incidents = await self._find_similar_incidents(None, latitude, longitude)
         existing_reports = await self._get_existing_reports(existing_incidents)
-
         analysis = await self._understand(text, image_url, existing_reports, existing_incidents)
+        prism.finish_span(
+            spans[-1] if spans else prism.create_span("search_incidents", "tool", input_text=f"lat={latitude} lon={longitude}"),
+            span_understand_start,
+        ) if spans else None
         category = analysis.get("category", "waste")
         severity = analysis.get("severity", 1)
         confidence = analysis.get("confidence", 0.5)
         description = analysis.get("description", text)
         uncertainty_reason = analysis.get("uncertainty_reason", None)
         skill_name = self._select_skill(category)
+
+        span_understand = prism.create_span(
+            name="understand_report",
+            span_type="llm",
+            input_text=text[:500],
+            output_text=json.dumps(analysis)[:500],
+            model=self.ai.fast_model,
+        )
+        span_understand["start_time"] = prism._now_iso()
+        span_understand["duration_ms"] = int((time.time() - span_understand_start) * 1000)
+        spans.append(span_understand)
 
         incident_id = None
         is_new_incident = True
@@ -48,8 +64,17 @@ class Orchestrator:
             is_new_incident = False
             tool_calls_log.append({"tool": "search_incidents", "result": f"Found {len(existing_incidents)} similar incidents"})
             await self._add_report_to_incident(incident_id, text, latitude, longitude)
+            span_search = prism.create_span(
+                name="search_incidents",
+                span_type="tool",
+                input_text=f"category={category} lat={latitude} lon={longitude} radius=2km",
+                output_text=f"Found {len(existing_incidents)} incidents",
+                metadata={"incident_ids": [i["id"] for i in existing_incidents[:3]]},
+            )
+            spans.append(span_search)
 
             if existing_incidents[0].get("severity", 1) < severity:
+                span_escalate_start = time.time()
                 await registry.execute(
                     "update_incident_status",
                     incident_id=incident_id,
@@ -57,11 +82,29 @@ class Orchestrator:
                     reason=f"Severity escalated from {existing_incidents[0].get('severity', 1)} to {severity} based on new evidence",
                 )
                 tool_calls_log.append({"tool": "update_severity", "result": f"Escalated severity to {severity}"})
+                span_escalate = prism.create_span(
+                    name="escalate_severity",
+                    span_type="tool",
+                    input_text=f"incident={incident_id} from={existing_incidents[0].get('severity', 1)} to={severity}",
+                    output_text="Escalated",
+                )
+                span_escalate["duration_ms"] = int((time.time() - span_escalate_start) * 1000)
+                spans.append(span_escalate)
 
             if len(existing_incidents) > 1:
                 ids = [i["id"] for i in existing_incidents[:3]]
+                span_correlate_start = time.time()
                 await registry.execute("correlate_incidents", incident_ids=ids)
+                span_correlate = prism.create_span(
+                    name="correlate_incidents",
+                    span_type="tool",
+                    input_text=f"incident_ids={ids}",
+                    output_text=f"Correlated {len(ids)} incidents",
+                )
+                span_correlate["duration_ms"] = int((time.time() - span_correlate_start) * 1000)
+                spans.append(span_correlate)
         else:
+            span_create_start = time.time()
             incident_result = await registry.execute(
                 "create_incident",
                 category=category,
@@ -73,8 +116,19 @@ class Orchestrator:
             )
             incident_id = incident_result.data.get("id") if incident_result.success else None
             tool_calls_log.append({"tool": "create_incident", "result": f"Created incident {incident_id}"})
+            span_create = prism.create_span(
+                name="create_incident",
+                span_type="tool",
+                input_text=f"category={category} severity={severity} confidence={confidence}",
+                output_text=f"Created {incident_id}",
+                metadata={"incident_id": incident_id},
+            )
+            span_create["duration_ms"] = int((time.time() - span_create_start) * 1000)
+            spans.append(span_create)
 
+        team_decision = ""
         if confidence >= 0.4:
+            span_dispatch_start = time.time()
             dispatch_result = await registry.execute(
                 "get_available_teams",
                 category=category,
@@ -83,9 +137,9 @@ class Orchestrator:
             )
             tool_calls_log.append({"tool": "get_available_teams", "result": f"Found {dispatch_result.data.get('count', 0)} teams" if dispatch_result.success else dispatch_result.error})
 
-            team_decision = ""
             if dispatch_result.success and dispatch_result.data.get("teams"):
                 team = dispatch_result.data["teams"][0]
+                span_assign_start = time.time()
                 assignment_result = await registry.execute(
                     "assign_team",
                     team_id=team["id"],
@@ -103,22 +157,58 @@ class Orchestrator:
                             team_decision = f"Replanned: Assigned {alt['name']} (ETA: {alt_result.data.get('eta_minutes', '?')} min)"
                             tool_calls_log.append({"tool": "assign_team", "result": team_decision})
                             break
+                span_assign = prism.create_span(
+                    name="assign_team",
+                    span_type="tool",
+                    input_text=f"team={team['id']} incident={incident_id}",
+                    output_text=team_decision,
+                    metadata={"team_name": team["name"]},
+                )
+                span_assign["duration_ms"] = int((time.time() - span_assign_start) * 1000)
+                spans.append(span_assign)
             else:
                 team_decision = "No available teams with matching capability"
                 tool_calls_log.append({"tool": "dispatch", "result": team_decision})
+            span_dispatch = prism.create_span(
+                name="dispatch_team",
+                span_type="tool",
+                input_text=f"category={category} lat={latitude} lon={longitude}",
+                output_text=team_decision,
+            )
+            span_dispatch["duration_ms"] = int((time.time() - span_dispatch_start) * 1000)
+            spans.append(span_dispatch)
         else:
             team_decision = "HOLD: Insufficient confidence for dispatch - additional verification recommended"
             tool_calls_log.append({"tool": "dispatch", "result": team_decision})
 
+        span_policy_start = time.time()
         policy_result = await registry.execute("retrieve_policy", category=category)
         tool_calls_log.append({"tool": "retrieve_policy", "result": f"Found {policy_result.data.get('count', 0)} policies" if policy_result.success else "Failed"})
+        span_policy = prism.create_span(
+            name="retrieve_policy",
+            span_type="tool",
+            input_text=f"category={category}",
+            output_text=f"Found {policy_result.data.get('count', 0)} policies" if policy_result.success else "Failed",
+        )
+        span_policy["duration_ms"] = int((time.time() - span_policy_start) * 1000)
+        spans.append(span_policy)
 
+        span_response_start = time.time()
         response_text = await self._generate_response(
             text, analysis, team_decision, policy_result, is_new_incident,
             existing_incidents, existing_reports, uncertainty_reason
         )
+        span_response = prism.create_span(
+            name="generate_response",
+            span_type="llm",
+            input_text=text[:500],
+            output_text=response_text[:500],
+            model=self.ai.fast_model,
+        )
+        span_response["duration_ms"] = int((time.time() - span_response_start) * 1000)
+        spans.append(span_response)
 
-        latency = int((time.time() - start) * 1000)
+        latency = int((time.time() - run_start) * 1000)
 
         async with async_session() as db:
             run = (await db.execute(select(AgentRun).where(AgentRun.id == run_id))).scalar_one()
@@ -154,6 +244,7 @@ class Orchestrator:
                 "uncertainty_reason": uncertainty_reason,
                 "evidence_count": len(existing_reports) + 1,
             },
+            spans=spans,
         )
 
         return {
@@ -171,8 +262,9 @@ class Orchestrator:
         }
 
     async def replan_for_incident(self, incident_id: str) -> dict:
-        start = time.time()
+        run_start = time.time()
         tool_calls_log = []
+        spans = []
 
         async with async_session() as db:
             incident = (await db.execute(select(Incident).where(Incident.id == incident_id))).scalar_one_or_none()
@@ -183,6 +275,7 @@ class Orchestrator:
         latitude = incident.latitude
         longitude = incident.longitude
 
+        span_dispatch_start = time.time()
         dispatch_result = await registry.execute(
             "get_available_teams",
             category=category,
@@ -197,10 +290,20 @@ class Orchestrator:
             for team in dispatch_result.data["teams"]:
                 if team["status"] == "unavailable":
                     continue
+                span_assign_start = time.time()
                 result = await registry.execute("assign_team", team_id=team["id"], incident_id=incident_id)
                 if result.success:
                     team_decision = f"Replanned: Assigned {team['name']} (ETA: {result.data.get('eta_minutes', '?')} min)"
                     tool_calls_log.append({"tool": "assign_team", "result": team_decision})
+                    span_assign = prism.create_span(
+                        name="replan_assign_team",
+                        span_type="tool",
+                        input_text=f"team={team['id']} incident={incident_id}",
+                        output_text=team_decision,
+                        metadata={"team_name": team["name"]},
+                    )
+                    span_assign["duration_ms"] = int((time.time() - span_assign_start) * 1000)
+                    spans.append(span_assign)
                     break
                 else:
                     tool_calls_log.append({"tool": "assign_team", "result": f"Failed for {team['name']}: {result.error}"})
@@ -208,6 +311,16 @@ class Orchestrator:
         if not team_decision:
             team_decision = "No available teams - escalation required"
 
+        span_dispatch = prism.create_span(
+            name="replan_dispatch",
+            span_type="tool",
+            input_text=f"incident={incident_id} category={category}",
+            output_text=team_decision,
+        )
+        span_dispatch["duration_ms"] = int((time.time() - span_dispatch_start) * 1000)
+        spans.append(span_dispatch)
+
+        span_llm_start = time.time()
         response_text = await self.ai.generate(
             messages=[
                 {"role": "system", "content": (
@@ -223,8 +336,17 @@ class Orchestrator:
             model=self.ai.fast_model,
             max_tokens=200,
         )
+        span_llm = prism.create_span(
+            name="replan_generate_response",
+            span_type="llm",
+            input_text=f"Replan for {incident_id[:8]} ({category})",
+            output_text=response_text.content[:500],
+            model=self.ai.fast_model,
+        )
+        span_llm["duration_ms"] = int((time.time() - span_llm_start) * 1000)
+        spans.append(span_llm)
 
-        latency = int((time.time() - start) * 1000)
+        latency = int((time.time() - run_start) * 1000)
 
         await prism.trace_run(
             session_id=f"replan-{incident_id[:8]}",
@@ -234,6 +356,7 @@ class Orchestrator:
             output_text=response_text.content,
             latency_ms=latency,
             metadata={"action": "replan", "tool_calls": tool_calls_log},
+            spans=spans,
         )
 
         return {
